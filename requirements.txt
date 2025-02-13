@@ -1,0 +1,6 @@
+cryptography==39.0.2
+orjson==3.10.15
+polars==1.22.0
+Requests==2.32.3
+simplejson==3.19.3
+zstandard==0.23.0
