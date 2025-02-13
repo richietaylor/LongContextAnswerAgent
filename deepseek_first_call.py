@@ -16,8 +16,13 @@ client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
 
 response = client.chat.completions.create(
     model="deepseek-chat",
+
+    # Temperature Partner is cool, maybe use it?: https://api-docs.deepseek.com/quick_start/parameter_settings
+
     messages=[
+        # Overall behavior of the assistant
         {"role": "system", "content": "You are a helpful assistant"},
+        # Question
         {"role": "user", "content": "Hello"},
     ],
     stream=False

@@ -24,6 +24,7 @@ import requests
 import simplejson
 import zstandard as zstd
 from cryptography.fernet import Fernet
+from openai import OpenAI
 
 load_dotenv(dotenv_path='keys.env')
 
@@ -242,7 +243,36 @@ def finweb_slow_search(
             print(f"{dt.datetime.utcnow()} FINWEB IS CURRENTLY OVERLOADED \n\n {str(response.text)}")
 
 
+def deepseek_ask():
+    # Get the API key from the environment variable
+    api_key = os.getenv("DEEPSEEK_V1_API_KEY")
+
+    if not api_key:
+        raise ValueError("API key not found. Please set DEEPSEEK_V1_API_KEY in your keys.env file.")
+
+
+    client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
+
+    response = client.chat.completions.create(
+        model="deepseek-chat",
+
+        # Temperature Partner is cool, maybe use it?: https://api-docs.deepseek.com/quick_start/parameter_settings
+
+        messages=[
+            # Overall behavior of the assistant
+            {"role": "system", "content": "You are a helpful assistant"},
+            # Question
+            {"role": "user", "content": "Hello"},
+        ],
+        stream=False
+    )
+
+    print(response.choices[0].message.content)
+
+
 if __name__ == "__main__":
+
+    deepseek_ask()
 
     api_key = os.getenv("FINWEB_V1_API_KEY")
 
