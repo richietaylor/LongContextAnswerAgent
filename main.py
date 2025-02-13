@@ -1,7 +1,6 @@
 import datetime as dt
 import os
 import time
-
 from dotenv import load_dotenv
 import orjson
 import polars as pl
@@ -10,8 +9,9 @@ import simplejson
 import zstandard as zstd
 from cryptography.fernet import Fernet
 from openai import OpenAI
-
-
+from openai import APIError, OpenAI, RateLimitError
+import requests
+from json.decoder import JSONDecodeError
 
 load_dotenv(dotenv_path='keys.env')
 
@@ -188,60 +188,6 @@ If the answer isn't contained in the context, say so explicitly.
     return prompt
 
 
-def log_raw_http_error(e):
-    """
-    This helper attempts to extract raw HTTP response info from an OpenAI-like error
-    and print it out, so you can see if it's an HTML error, invalid credentials, etc.
-    """
-    # The openai library often stashes the response in e.http_status / e.http_body
-    # but it depends on the library version. We’ll do some checks:
-    if hasattr(e, "http_status"):
-        print("HTTP status code:", e.http_status)
-    if hasattr(e, "http_body"):
-        print("HTTP response body:")
-        print(e.http_body)
-    else:
-        print("Could not find http_body in exception.")
-    print("Full exception:", e)
-
-
-def deepseek_ask(client, prompt, conversation_history=None):
-    """
-    Call the DeepSeek (OpenAI-like) chat completion API.
-    'conversation_history' can be used if you want to pass the entire conversation each time,
-    but beware of context window size.
-    """
-    messages = []
-
-    # Optionally add a system message for initial instructions.
-    system_message = {
-        "role": "system",
-        "content": "You are a helpful assistant that cites relevant doc IDs in square brackets."
-    }
-    messages.append(system_message)
-
-    # If we want multi-turn history, append it here
-    if conversation_history:
-        messages.extend(conversation_history)
-
-    # The user prompt is appended as the last message
-    messages.append({"role": "user", "content": prompt})
-
-    try:
-        response = client.chat.completions.create(
-            model="deepseek-chat",
-            messages=messages,
-            stream=False
-        )
-        return response.choices[0].message.content
-
-    except Exception as e:
-        print("[DEBUG] An error occurred when calling DeepSeek!")
-        log_raw_http_error(e)
-        # Re-raise the exception or return something descriptive
-        raise
-        # or return f"Error: {str(e)}"
-
 def build_expansions(user_question: str) -> list[str]:
     """
     Given the user's question, build a few expansions / variations
@@ -260,34 +206,147 @@ def build_expansions(user_question: str) -> list[str]:
     return expansions
 
 
-# def deepseek_ask(client, prompt, conversation_history=None):
+# def deepseek_ask(client, prompt, conversation_history=None, timeout=60, max_retries=10, backoff=5):
 #     """
-#     Call the DeepSeek (OpenAI-like) chat completion API.
-#     'conversation_history' can be used if you want to pass the entire conversation each time,
-#     but beware of context window size.
+#     Make a direct POST to DeepSeek's /v1/chat/completions endpoint
+#     with a custom timeout and retry logic.
 #     """
+#     # Build messages
 #     messages = []
-
-#     # Optionally add a system message for initial instructions.
 #     system_message = {
 #         "role": "system",
 #         "content": "You are a helpful assistant that cites relevant doc IDs in square brackets."
 #     }
 #     messages.append(system_message)
 
-#     # If we want multi-turn history, append it here:
 #     if conversation_history:
 #         messages.extend(conversation_history)
 
-#     # The user prompt is appended as the last message:
 #     messages.append({"role": "user", "content": prompt})
 
-#     response = client.chat.completions.create(
-#         model="deepseek-chat",
-#         messages=messages,
-#         stream=False
-#     )
-#     return response.choices[0].message.content
+#     # Construct the JSON payload
+#     data = {
+#         "model": "deepseek-chat",
+#         "messages": messages,
+#         "stream": False
+#     }
+
+#     # Use the client's API key and base_url
+#     endpoint = f"{str(client.base_url).rstrip('/')}/v1/chat/completions"
+#     headers = {
+#         "Authorization": f"Bearer {client.api_key}",
+#         "Content-Type": "application/json"
+#     }
+
+#     # Retry loop
+#     for attempt in range(1, max_retries + 1):
+#         try:
+#             print(f"[DEBUG] Attempt {attempt}: POST {endpoint} with timeout={timeout}")
+#             resp = requests.post(endpoint, json=data, headers=headers, timeout=timeout)
+#             print("[DEBUG] Status code:", resp.status_code)
+#             print("[DEBUG] Body:", resp.text)
+
+#             # If you got a 2xx status but the body is empty, treat that as an error to maybe retry
+#             if resp.status_code == 200 and not resp.text.strip():
+#                 print("[DEBUG] 200 with empty body, consider this an error to retry or fail.")
+#                 # If you want to treat it as a retryable error:
+#                 if attempt < max_retries:
+#                     time.sleep(backoff)
+#                     continue
+#                 else:
+#                     raise ValueError("DeepSeek returned 200 with empty body.")
+
+#             resp.raise_for_status()  # raise for 4xx or 5xx
+
+#             # Attempt to parse the JSON
+#             parsed = resp.json()
+#             # Validate structure
+#             if "choices" not in parsed or not parsed["choices"]:
+#                 raise ValueError("No 'choices' in DeepSeek response.")
+#             return parsed["choices"][0]["message"]["content"]
+
+#         except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+#             print(f"[DEBUG] Network error on attempt {attempt}: {e}")
+#             # Retry if attempts remain
+#             if attempt < max_retries:
+#                 time.sleep(backoff)
+#             else:
+#                 raise
+
+#         except Exception as e:
+#             print(f"[DEBUG] Non-network error on attempt {attempt}: {e}")
+#             # Decide if you want to treat it as retryable
+#             raise  # or handle differently
+
+#     raise RuntimeError("Ran out of retries, request failed each time.")
+
+import time
+
+
+def deepseek_ask(client, prompt, conversation_history=None, max_retries=10, backoff=5):
+    """
+    Call the DeepSeek (OpenAI-like) chat completion API using the official OpenAI client method.
+    Includes built-in retry logic and debug prints.
+    """
+    messages = []
+    system_message = {
+        "role": "system",
+        "content": "You are a helpful assistant that cites relevant doc IDs in square brackets."
+    }
+    messages.append(system_message)
+
+    if conversation_history:
+        messages.extend(conversation_history)
+
+    messages.append({"role": "user", "content": prompt})
+
+    # print("[DEBUG] Sending request with messages:")
+    # print(messages)
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            print(f"[DEBUG] Attempt {attempt}: Calling client.chat.completions.create()")
+            response = client.chat.completions.create(
+                model="deepseek-chat",
+                messages=messages,
+                stream=False
+            )
+            print("[DEBUG] Response received:")
+            # print(response)
+
+            if not response.choices or not response.choices[0].message.content:
+                raise ValueError("Response did not contain any choices or content.")
+
+            return response.choices[0].message.content
+
+
+        except (APIError, RateLimitError, JSONDecodeError) as e:
+            # Try to retrieve an HTTP status code from the exception, if available.
+            http_status = getattr(e, "http_status", "Unknown")
+            print(f"[DEBUG] Error on attempt {attempt} (HTTP status: {http_status}): {e}")
+            if attempt < max_retries:
+                print(f"[DEBUG] Retrying in {backoff} seconds...")
+                time.sleep(backoff)
+            else:
+                print("[DEBUG] Max retries reached. Raising exception.")
+                raise
+
+        except Exception as e:
+            print(f"[DEBUG] Non-retryable error on attempt {attempt}: {e}")
+            raise
+        # except (APIError, RateLimitError) as e:
+        #     print(f"[DEBUG] Transient error on attempt {attempt}: {e}")
+        #     if attempt < max_retries:
+        #         print(f"[DEBUG] Waiting {backoff} seconds before retry...")
+        #         time.sleep(backoff)
+        #     else:
+        #         print("[DEBUG] Max retries reached. Raising exception.")
+        #         raise
+        # except Exception as e:
+        #     print(f"[DEBUG] Non-retryable error on attempt {attempt}: {e}")
+        #     raise
+
+    raise RuntimeError("All retry attempts failed.")
 
 
 def main():
@@ -308,25 +367,26 @@ def main():
     # ----------------------------------------------------------------------------------
     # 2) Gather user input for the initial question
     # ----------------------------------------------------------------------------------
-    user_question = input("\nEnter your main question: ")
+    # user_question = input("\nEnter your main question: ")
+    user_question = "What scientific breakthroughs will impact the US markets the most?"
 
     # ----------------------------------------------------------------------------------
     # 3) Run Finweb slow search (only once for the main question)
     # ----------------------------------------------------------------------------------
-    # expansions = build_expansions(user_question)
+    expansions = build_expansions(user_question)
 
-    expansions = [
-        "What are the terms and conditions of the deal between Microsoft and OpenAI?",
-        "What have Microsoft and OpenAI agreed to in terms of their partnership?",
-        "What restrictions have been placed upon OpenAI as part of their Microsoft deal?",
-        "Under what conditions can Microsoft or OpenAI exit their partnership?",
-        "What are the details of the partnership between OpenAI and Microsoft?",
-        "Why did Microsoft decide to invest into OpenAI? What are the terms of the deal?",
-        "What are the legal requirements placed upon OpenAI as part of the Microsoft investment?",
-        "What are the financial terms and equity stakes in the Microsoft-OpenAI deal?",
-        "How does the Microsoft-OpenAI partnership affect OpenAI's autonomy and projects?",
-        "What legal requirements must OpenAI meet due to the Microsoft investment?"
-    ]
+    # expansions = [
+    #     "What are the terms and conditions of the deal between Microsoft and OpenAI?",
+    #     "What have Microsoft and OpenAI agreed to in terms of their partnership?",
+    #     "What restrictions have been placed upon OpenAI as part of their Microsoft deal?",
+    #     "Under what conditions can Microsoft or OpenAI exit their partnership?",
+    #     "What are the details of the partnership between OpenAI and Microsoft?",
+    #     "Why did Microsoft decide to invest into OpenAI? What are the terms of the deal?",
+    #     "What are the legal requirements placed upon OpenAI as part of the Microsoft investment?",
+    #     "What are the financial terms and equity stakes in the Microsoft-OpenAI deal?",
+    #     "How does the Microsoft-OpenAI partnership affect OpenAI's autonomy and projects?",
+    #     "What legal requirements must OpenAI meet due to the Microsoft investment?"
+    # ]
 
     # sql_filter = "SELECT loc FROM engine WHERE published>='2025-01-01' ORDER BY similarity DESC"
     sql_filter = "SELECT loc FROM engine WHERE published>='2025-01-01'"
@@ -370,7 +430,8 @@ def main():
     # ----------------------------------------------------------------------------------
     # 6) Let the user optionally inspect context
     # ----------------------------------------------------------------------------------
-    choice = input("Show the context that will be sent to DeepSeek? (y/n) ")
+    # choice = input("Show the context that will be sent to DeepSeek? (y/n) ")
+    choice = "y"
     if choice.lower().startswith("y"):
         show_context(context_chunks)
 
