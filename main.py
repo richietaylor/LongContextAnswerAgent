@@ -242,6 +242,22 @@ def deepseek_ask(client, prompt, conversation_history=None):
         raise
         # or return f"Error: {str(e)}"
 
+def build_expansions(user_question: str) -> list[str]:
+    """
+    Given the user's question, build a few expansions / variations
+    that might help Finweb's semantic search find more relevant docs.
+
+    This is a naive example that just adds typical rephrasings like 'details of',
+    'explanations for', etc. Feel free to tweak or expand as needed.
+    """
+    expansions = [
+        user_question,  # Include the original question verbatim
+        f"What are the details of: {user_question}?",
+        f"Explain the context of: {user_question}?",
+        f"Why is {user_question} important?",
+        f"Give me more information about: {user_question}?",
+    ]
+    return expansions
 
 
 # def deepseek_ask(client, prompt, conversation_history=None):
@@ -297,6 +313,8 @@ def main():
     # ----------------------------------------------------------------------------------
     # 3) Run Finweb slow search (only once for the main question)
     # ----------------------------------------------------------------------------------
+    # expansions = build_expansions(user_question)
+
     expansions = [
         "What are the terms and conditions of the deal between Microsoft and OpenAI?",
         "What have Microsoft and OpenAI agreed to in terms of their partnership?",
@@ -310,9 +328,9 @@ def main():
         "What legal requirements must OpenAI meet due to the Microsoft investment?"
     ]
 
-    # expansions = []
+    # sql_filter = "SELECT loc FROM engine WHERE published>='2025-01-01' ORDER BY similarity DESC"
+    sql_filter = "SELECT loc FROM engine WHERE published>='2025-01-01'"
 
-    sql_filter = "SELECT loc FROM engine WHERE published>='2025-01-01 ORDER BY similarity DESC'"
 
     df = finweb_slow_search(
         question=user_question,
