@@ -16,6 +16,7 @@
 import datetime as dt
 import os
 import time
+from dotenv import load_dotenv
 
 import orjson
 import polars as pl
@@ -24,6 +25,7 @@ import simplejson
 import zstandard as zstd
 from cryptography.fernet import Fernet
 
+load_dotenv(dotenv_path='keys.env')
 
 def finweb_fast_search(
         question: str,
@@ -241,7 +243,12 @@ def finweb_slow_search(
 
 if __name__ == "__main__":
 
-    os.environ["FINWEB_V1_API_KEY"] = "test|XXEehB5C5aKe0dXa4DzeO7TcZGWBvAKWmVp87E4o"
+    api_key = os.getenv("FINWEB_V1_API_KEY")
+
+    if not api_key:
+        raise ValueError("API key not found. Please set FINWEB_V1_API_KEY in your .env file.")
+
+    os.environ["FINWEB_V1_API_KEY"] = api_key
 
     df = finweb_slow_search(
         question="What are the terms of the partnership between Microsoft and OpenAI?",
