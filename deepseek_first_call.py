@@ -52,7 +52,7 @@ response = client.chat.completions.create(
         # Overall behavior of the assistant
         {"role": "system", "content": "You are a helpful assistant"},
         # Question
-        {"role": "user", "content": "What is happening between openAI and microsoft?"},
+        {"role": "user", "content": "Can you please give me 10 expansions of the question: What is happening between openAI and microsoft?"},
     ],
     stream=False
 )

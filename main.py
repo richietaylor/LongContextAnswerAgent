@@ -154,7 +154,8 @@ def show_context(context_chunks):
     """
     print("\n=== CONTEXT CHUNKS ===")
     for ch in context_chunks:
-        print(f"- [Chunk ID: {ch['id']}] Similarity={ch['similarity']:.3f}\n{ch['content'][:200]}...\n")
+        # print(f"- [Chunk ID: {ch['id']}] Similarity={ch['similarity']:.3f}\n{ch['content'][:200]}...\n")
+        print(f"- [Chunk ID: {ch['id']}] Title: {ch['title']}\n  URL: {ch['url']}\n  Similarity: {ch['similarity']:.3f}\n  Content snippet: {ch['content'][:200]}...\n")
     print("======================\n")
 
 
@@ -203,6 +204,39 @@ def build_expansions(user_question: str) -> list[str]:
         f"Why is {user_question} important?",
         f"Give me more information about: {user_question}?",
     ]
+
+    # # Get the API key from the environment variable
+    # api_key = os.getenv("DEEPSEEK_V1_API_KEY")
+
+    # if not api_key:
+    #     raise ValueError("API key not found. Please set DEEPSEEK_V1_API_KEY in your keys.env file.")
+
+    # client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
+
+    # question = f"Can you please give me 10 expansions of the question: {user_question}?"
+    # response = client.chat.completions.create(
+    #     model="deepseek-chat",
+    #     # Temperature Partner is cool, maybe use it?: https://api-docs.deepseek.com/quick_start/parameter_settings
+        
+        
+    #     messages=[
+    #         # Overall behavior of the assistant
+    #         {"role": "system", "content": "You are a helpful assistant, give your answer in the format of a python dictionary with no other text"},
+    #         # Question
+            
+    #         {"role": "user", "content": question},
+    #     ],
+    #     stream=False
+    # )
+
+    # print(response.choices[0].message.content)
+    # try:
+    #     expansions = orjson.loads(response.choices[0].message.content)
+    # except orjson.JSONDecodeError as e:
+    #     print(f"Error decoding JSON: {e}")
+    #     expansions = []
+
+    # print(response.choices[0].message.content)
     return expansions
 
 
@@ -370,10 +404,13 @@ def main():
     # user_question = input("\nEnter your main question: ")
     user_question = "What scientific breakthroughs will impact the US markets the most?"
 
+    print("Question:", {user_question})
     # ----------------------------------------------------------------------------------
     # 3) Run Finweb slow search (only once for the main question)
     # ----------------------------------------------------------------------------------
     expansions = build_expansions(user_question)
+
+    print("Expansions:", expansions)
 
     # expansions = [
     #     "What are the terms and conditions of the deal between Microsoft and OpenAI?",
@@ -388,6 +425,16 @@ def main():
     #     "What legal requirements must OpenAI meet due to the Microsoft investment?"
     # ]
 
+    # Ask the user for a date range
+    # date_start = input("Enter the start date (YYYY-MM-DD): ")
+    date_start = "2025-01-01"
+    # date_end = input("Enter the end date (YYYY-MM-DD): ")
+    date_end = dt.datetime.now().strftime("%Y-%m-%d")
+    print("Date range:", date_start, "to", date_end)
+
+    sql_filter = f"SELECT loc FROM engine WHERE published BETWEEN '{date_start}' AND '{date_end}'"
+    
+
     # sql_filter = "SELECT loc FROM engine WHERE published>='2025-01-01' ORDER BY similarity DESC"
     sql_filter = "SELECT loc FROM engine WHERE published>='2025-01-01'"
 
@@ -396,7 +443,7 @@ def main():
         question=user_question,
         expansions=expansions,
         sql_filter=sql_filter,
-        n_results=1000,      # can be up to 10,000
+        n_results=10_000,      # can be up to 10,000
         n_probes=300,
         n_contextify=512,
         algorithm="hybrid-1"
