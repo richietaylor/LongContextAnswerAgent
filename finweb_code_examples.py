@@ -16,7 +16,6 @@
 import datetime as dt
 import os
 import time
-from dotenv import load_dotenv
 
 import orjson
 import polars as pl
@@ -24,7 +23,7 @@ import requests
 import simplejson
 import zstandard as zstd
 from cryptography.fernet import Fernet
-from openai import OpenAI
+from dotenv import load_dotenv
 
 load_dotenv(dotenv_path='keys.env')
 
@@ -243,43 +242,9 @@ def finweb_slow_search(
             print(f"{dt.datetime.utcnow()} FINWEB IS CURRENTLY OVERLOADED \n\n {str(response.text)}")
 
 
-def deepseek_ask():
-    # Get the API key from the environment variable
-    api_key = os.getenv("DEEPSEEK_V1_API_KEY")
-
-    if not api_key:
-        raise ValueError("API key not found. Please set DEEPSEEK_V1_API_KEY in your keys.env file.")
-
-
-    client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
-
-    response = client.chat.completions.create(
-        model="deepseek-chat",
-
-        # Temperature Partner is cool, maybe use it?: https://api-docs.deepseek.com/quick_start/parameter_settings
-
-        messages=[
-            # Overall behavior of the assistant
-            {"role": "system", "content": "You are a helpful assistant"},
-            # Question
-            {"role": "user", "content": "Hello"},
-        ],
-        stream=False
-    )
-
-    print(response.choices[0].message.content)
-
-
 if __name__ == "__main__":
 
-    deepseek_ask()
-
-    api_key = os.getenv("FINWEB_V1_API_KEY")
-
-    if not api_key:
-        raise ValueError("API key not found. Please set FINWEB_V1_API_KEY in your .env file.")
-
-    os.environ["FINWEB_V1_API_KEY"] = api_key
+    # os.environ["FINWEB_V1_API_KEY"] = ""
 
     df = finweb_slow_search(
         question="What are the terms of the partnership between Microsoft and OpenAI?",
@@ -295,40 +260,23 @@ if __name__ == "__main__":
             "How does the Microsoft-OpenAI partnership affect OpenAI's autonomy and projects?",
             "What legal requirements must OpenAI meet due to the Microsoft investment?"
         ],
-        # So far sorting by similarity and limiting to 1000 results (just because)
-        sql_filter="SELECT loc FROM engine WHERE published>='2025-01-01 ORDER BY similarity DESC'",
-        # @TODO: Find out why LIMIT is breaking things
-        # sql_filter="SELECT loc FROM engine WHERE published>='2025-01-01' ORDER BY similarity DESC LIMIT 1000",
+        sql_filter="SELECT loc FROM engine WHERE published>='2025-01-01'",
 
         # These default parameters should work fine for your use case.
         n_probes=300,
-        n_results=1_000,
+        n_results=10_000,
         n_contextify=512,
         algorithm="hybrid-1"
     )
+    df.write_csv(file="all_results.csv")  # Write all results to disk.
 
-    # Create the outputs directory if it doesn't exist
-    os.makedirs("outputs", exist_ok=True)
-
-    # Get the current time in 24-hour format (hours and minutes)
-    current_time = dt.datetime.now().strftime("%H_%M")
-    
-    # Define the output file path
-    output_file_path = f"outputs/output_{current_time}.csv"
-
-    # Write all results to the output file
-    df.write_csv(file=output_file_path)
-
-    print(f"Results saved to {output_file_path}")
-    
-    
-    # # You can also use fast search for testing.
-    # finweb_fast_search(
-    #     question="What is the role of Fixed Income in Portfolio Diversification?",
-    #     expansions=[],
-    #     sql_filter="SELECT loc FROM engine",
-    #     n_probes=10,
-    #     n_results=10,
-    #     n_contextify=128,
-    #     algorithm="hybrid-1"
-    # )
+    # You can also use fast search for testing.
+    finweb_fast_search(
+        question="What is the role of Fixed Income in Portfolio Diversification?",
+        expansions=[],
+        sql_filter="SELECT loc FROM engine",
+        n_probes=10,
+        n_results=10,
+        n_contextify=128,
+        algorithm="hybrid-1"
+    )
