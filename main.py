@@ -240,149 +240,6 @@ def build_expansions(user_question: str) -> list[str]:
     return expansions
 
 
-# def deepseek_ask(client, prompt, conversation_history=None, timeout=60, max_retries=10, backoff=5):
-#     """
-#     Make a direct POST to DeepSeek's /v1/chat/completions endpoint
-#     with a custom timeout and retry logic.
-#     """
-#     # Build messages
-#     messages = []
-#     system_message = {
-#         "role": "system",
-#         "content": "You are a helpful assistant that cites relevant doc IDs in square brackets."
-#     }
-#     messages.append(system_message)
-
-#     if conversation_history:
-#         messages.extend(conversation_history)
-
-#     messages.append({"role": "user", "content": prompt})
-
-#     # Construct the JSON payload
-#     data = {
-#         "model": "deepseek-chat",
-#         "messages": messages,
-#         "stream": False
-#     }
-
-#     # Use the client's API key and base_url
-#     endpoint = f"{str(client.base_url).rstrip('/')}/v1/chat/completions"
-#     headers = {
-#         "Authorization": f"Bearer {client.api_key}",
-#         "Content-Type": "application/json"
-#     }
-
-#     # Retry loop
-#     for attempt in range(1, max_retries + 1):
-#         try:
-#             print(f"[DEBUG] Attempt {attempt}: POST {endpoint} with timeout={timeout}")
-#             resp = requests.post(endpoint, json=data, headers=headers, timeout=timeout)
-#             print("[DEBUG] Status code:", resp.status_code)
-#             print("[DEBUG] Body:", resp.text)
-
-#             # If you got a 2xx status but the body is empty, treat that as an error to maybe retry
-#             if resp.status_code == 200 and not resp.text.strip():
-#                 print("[DEBUG] 200 with empty body, consider this an error to retry or fail.")
-#                 # If you want to treat it as a retryable error:
-#                 if attempt < max_retries:
-#                     time.sleep(backoff)
-#                     continue
-#                 else:
-#                     raise ValueError("DeepSeek returned 200 with empty body.")
-
-#             resp.raise_for_status()  # raise for 4xx or 5xx
-
-#             # Attempt to parse the JSON
-#             parsed = resp.json()
-#             # Validate structure
-#             if "choices" not in parsed or not parsed["choices"]:
-#                 raise ValueError("No 'choices' in DeepSeek response.")
-#             return parsed["choices"][0]["message"]["content"]
-
-#         except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
-#             print(f"[DEBUG] Network error on attempt {attempt}: {e}")
-#             # Retry if attempts remain
-#             if attempt < max_retries:
-#                 time.sleep(backoff)
-#             else:
-#                 raise
-
-#         except Exception as e:
-#             print(f"[DEBUG] Non-network error on attempt {attempt}: {e}")
-#             # Decide if you want to treat it as retryable
-#             raise  # or handle differently
-
-#     raise RuntimeError("Ran out of retries, request failed each time.")
-
-import time
-
-
-def deepseek_ask(client, prompt, conversation_history=None, max_retries=10, backoff=5):
-    """
-    Call the DeepSeek (OpenAI-like) chat completion API using the official OpenAI client method.
-    Includes built-in retry logic and debug prints.
-    """
-    messages = []
-    system_message = {
-        "role": "system",
-        "content": "You are a helpful assistant that cites relevant doc IDs in square brackets."
-    }
-    messages.append(system_message)
-
-    if conversation_history:
-        messages.extend(conversation_history)
-
-    messages.append({"role": "user", "content": prompt})
-
-    # print("[DEBUG] Sending request with messages:")
-    # print(messages)
-
-    for attempt in range(1, max_retries + 1):
-        try:
-            print(f"[DEBUG] Attempt {attempt}: Calling client.chat.completions.create()")
-            response = client.chat.completions.create(
-                model="deepseek-chat",
-                messages=messages,
-                stream=False
-            )
-            print("[DEBUG] Response received:")
-            # print(response)
-
-            if not response.choices or not response.choices[0].message.content:
-                raise ValueError("Response did not contain any choices or content.")
-
-            return response.choices[0].message.content
-
-
-        except (APIError, RateLimitError, JSONDecodeError) as e:
-            # Try to retrieve an HTTP status code from the exception, if available.
-            http_status = getattr(e, "http_status", "Unknown")
-            print(f"[DEBUG] Error on attempt {attempt} (HTTP status: {http_status}): {e}")
-            if attempt < max_retries:
-                print(f"[DEBUG] Retrying in {backoff} seconds...")
-                time.sleep(backoff)
-            else:
-                print("[DEBUG] Max retries reached. Raising exception.")
-                raise
-
-        except Exception as e:
-            print(f"[DEBUG] Non-retryable error on attempt {attempt}: {e}")
-            raise
-        # except (APIError, RateLimitError) as e:
-        #     print(f"[DEBUG] Transient error on attempt {attempt}: {e}")
-        #     if attempt < max_retries:
-        #         print(f"[DEBUG] Waiting {backoff} seconds before retry...")
-        #         time.sleep(backoff)
-        #     else:
-        #         print("[DEBUG] Max retries reached. Raising exception.")
-        #         raise
-        # except Exception as e:
-        #     print(f"[DEBUG] Non-retryable error on attempt {attempt}: {e}")
-        #     raise
-
-    raise RuntimeError("All retry attempts failed.")
-
-
 def main():
     # ----------------------------------------------------------------------------------
     # 1) Initialize Finweb / DeepSeek API Keys
@@ -412,18 +269,6 @@ def main():
 
     print("Expansions:", expansions)
 
-    # expansions = [
-    #     "What are the terms and conditions of the deal between Microsoft and OpenAI?",
-    #     "What have Microsoft and OpenAI agreed to in terms of their partnership?",
-    #     "What restrictions have been placed upon OpenAI as part of their Microsoft deal?",
-    #     "Under what conditions can Microsoft or OpenAI exit their partnership?",
-    #     "What are the details of the partnership between OpenAI and Microsoft?",
-    #     "Why did Microsoft decide to invest into OpenAI? What are the terms of the deal?",
-    #     "What are the legal requirements placed upon OpenAI as part of the Microsoft investment?",
-    #     "What are the financial terms and equity stakes in the Microsoft-OpenAI deal?",
-    #     "How does the Microsoft-OpenAI partnership affect OpenAI's autonomy and projects?",
-    #     "What legal requirements must OpenAI meet due to the Microsoft investment?"
-    # ]
 
     # Ask the user for a date range
     # date_start = input("Enter the start date (YYYY-MM-DD): ")
@@ -486,46 +331,46 @@ def main():
     # 7) Build prompt and call DeepSeek for the first answer
     # ----------------------------------------------------------------------------------
     prompt = build_prompt(user_question, context_chunks)
-    answer = deepseek_ask(client, prompt)
-    print("\n=== ANSWER ===")
-    print(answer)
-    print("=============\n")
+    # answer = deepseek_ask(client, prompt)
+    # print("\n=== ANSWER ===")
+    # print(answer)
+    # print("=============\n")
 
-    # ----------------------------------------------------------------------------------
-    # 8) Multi-turn follow-up loop
-    # ----------------------------------------------------------------------------------
-    conversation_history = [
-        {"role": "user", "content": prompt},
-        {"role": "assistant", "content": answer}
-    ]
+    # # ----------------------------------------------------------------------------------
+    # # 8) Multi-turn follow-up loop
+    # # ----------------------------------------------------------------------------------
+    # conversation_history = [
+    #     {"role": "user", "content": prompt},
+    #     {"role": "assistant", "content": answer}
+    # ]
 
-    while True:
-        follow_up = input("Enter a follow-up question (or 'exit' to quit): ")
-        if follow_up.strip().lower() == "exit":
-            print("Exiting. Goodbye!")
-            break
+    # while True:
+    #     follow_up = input("Enter a follow-up question (or 'exit' to quit): ")
+    #     if follow_up.strip().lower() == "exit":
+    #         print("Exiting. Goodbye!")
+    #         break
 
-        # We can reuse the same context chunks or re-sort them based on new question.
-        # For simplicity, let's just reuse the same top_df.
-        follow_up_prompt = build_prompt(follow_up, context_chunks)
+    #     # We can reuse the same context chunks or re-sort them based on new question.
+    #     # For simplicity, let's just reuse the same top_df.
+    #     follow_up_prompt = build_prompt(follow_up, context_chunks)
 
-        # Optionally show context again if user wants to see it:
-        # show_context(context_chunks)
+    #     # Optionally show context again if user wants to see it:
+    #     # show_context(context_chunks)
 
-        follow_up_answer = deepseek_ask(
-            client=client,
-            prompt=follow_up_prompt,
-            conversation_history=conversation_history
-        )
+    #     follow_up_answer = deepseek_ask(
+    #         client=client,
+    #         prompt=follow_up_prompt,
+    #         conversation_history=conversation_history
+    #     )
 
-        # Print the result
-        print("\n=== ANSWER ===")
-        print(follow_up_answer)
-        print("=============\n")
+    #     # Print the result
+    #     print("\n=== ANSWER ===")
+    #     print(follow_up_answer)
+    #     print("=============\n")
 
-        # Update conversation history
-        conversation_history.append({"role": "user", "content": follow_up_prompt})
-        conversation_history.append({"role": "assistant", "content": follow_up_answer})
+    #     # Update conversation history
+    #     conversation_history.append({"role": "user", "content": follow_up_prompt})
+    #     conversation_history.append({"role": "assistant", "content": follow_up_answer})
 
 
 if __name__ == "__main__":

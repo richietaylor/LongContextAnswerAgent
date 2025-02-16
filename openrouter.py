@@ -32,5 +32,5 @@ def generate(prompt: str) -> str:
 
 
 if __name__ == "__main__":
-    print(generate("Hello, world!"))
+    print(generate("What do you know about the universe?"))
 

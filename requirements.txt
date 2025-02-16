@@ -1,8 +1,10 @@
 cryptography==39.0.2
-openai==1.62.0
+numpy==2.2.3
+openai==1.63.0
 orjson==3.10.15
 polars==1.22.0
 python-dotenv==1.0.1
 Requests==2.32.3
 simplejson==3.19.3
+usearch==2.16.9
 zstandard==0.23.0
