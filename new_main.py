@@ -10,6 +10,7 @@ from cryptography.fernet import Fernet
 import numpy as np
 import json
 import usearch
+from usearch.index import Index
 
 # Import the Hugging Face tokenizer
 from transformers import AutoTokenizer
@@ -19,10 +20,6 @@ tokenizer = AutoTokenizer.from_pretrained("distilbert-base-uncased")
 
 # Load environment variables from keys.env file
 load_dotenv("keys.env")
-
-# Global debug flag and docs file name
-DEBUG_MODE = True
-DOCS_CSV = "docs.csv"
 
 # Set whether to display context or not
 SHOW_CONTEXT = True
@@ -41,6 +38,7 @@ def truncate_text(text, max_tokens=255):
     encoded = tokenizer.encode(text, add_special_tokens=True, truncation=True, max_length=max_tokens)
     truncated_text = tokenizer.decode(encoded, skip_special_tokens=True)
     return truncated_text
+
 
 
 ########################################
@@ -69,7 +67,9 @@ def remotely_embed_sentences_sync(
         raise ValueError("You may only embed up to 16 sentences at a time.")
     
     if endpoint_url is None:
-        endpoint_url = "https://j3rdbna8u6w2m9zq.us-east-1.aws.endpoints.huggingface.cloud"
+        endpoint_url = (
+            "https://j3rdbna8u6w2m9zq.us-east-1.aws.endpoints.huggingface.cloud"
+        )
     
     response = requests.post(
         url=endpoint_url,
@@ -86,6 +86,7 @@ def remotely_embed_sentences_sync(
     
     result = json.loads(response.content)
     
+    # If result is a dict, try to extract known keys.
     if isinstance(result, dict):
         if "embedding" in result:
             result = result["embedding"]
@@ -94,6 +95,7 @@ def remotely_embed_sentences_sync(
         else:
             result = list(result.values())
     
+    # If result is a list of dicts, assume the first key holds the embedding.
     if isinstance(result, list) and result and isinstance(result[0], dict):
         first_key = list(result[0].keys())[0]
         result = [d[first_key] for d in result]
@@ -107,13 +109,14 @@ def embed_text_hf(texts):
     This function first truncates each text to ensure it meets the token limit,
     then batches texts in groups of up to 16 and returns a NumPy array of embeddings.
     """
+    # Truncate each text using the updated tokenizer-based method (max 255 tokens)
     texts = [truncate_text(t, max_tokens=255) for t in texts]
     
     endpoint_url = os.getenv("HF_EMBED_ENDPOINT")
     if not endpoint_url:
         raise ValueError("HuggingFace server endpoint not set. Please set HF_EMBED_ENDPOINT in keys.env.")
-    
-    batch_size = 16
+
+    batch_size = 16  # Maximum allowed by the endpoint.
     all_embeddings = []
     for i in range(0, len(texts), batch_size):
         batch = texts[i: i + batch_size]
@@ -143,11 +146,11 @@ def finweb_slow_search(
     finweb_api_key = os.getenv("FINWEB_V1_API_KEY")
     if not finweb_api_key:
         raise ValueError("Finweb API key not set. Please define FINWEB_V1_API_KEY in keys.env.")
-    
+
     if attempts >= 3:
         print(f"{dt.datetime.utcnow()} The search has failed three times.")
         return None
-    
+
     response = requests.post(
         url="https://www.nosible.ai/search/v1/slow-search",
         json={
@@ -165,19 +168,19 @@ def finweb_slow_search(
             "api-key": finweb_api_key,
         },
     )
-    
+
     if isinstance(response, requests.Response):
         if response.status_code == 200:
             print(f"{dt.datetime.utcnow()} Slow search was accepted.")
             download_details = response.json()
             download_from: str = download_details["download_from"]
             decrypt_using: str = download_details["decrypt_using"]
-            
+
             print("")
             print(f"DOWNLOAD LINK: {download_from}")
             print(f"DECRYPTION KEY: {decrypt_using}")
             print("")
-            
+
             for _ in range(10):
                 print(f"{dt.datetime.utcnow()} Checking the download link.")
                 dl_response = requests.get(url=download_from)
@@ -249,23 +252,8 @@ def build_expansions(user_question: str) -> list[str]:
 
 
 ########################################
-# Helper Function to Save Docs to CSV
-########################################
-
-def save_docs_to_csv(df, filename=DOCS_CSV):
-    """
-    Saves the Polars DataFrame containing Finweb search results to a CSV file.
-    """
-    df.write_csv(filename)
-    print(f"Saved {len(df)} documents to {filename}")
-
-
-########################################
 # USearch Index and Query Functions
 ########################################
-
-# Import the Index class from USearch's submodule
-from usearch.index import Index
 
 def build_usearch_index(docs):
     """
@@ -276,12 +264,13 @@ def build_usearch_index(docs):
     texts = [d["content"] for d in docs]
     doc_ids = [d["id"] for d in docs]
     embeddings = embed_text_hf(texts)  # shape: (N, dim)
-    
+
+    # Use the imported Index class
     index = Index(ndim=len(embeddings[0]))
-    index.reserve(capacity=len(docs))
+    # Remove the reserve call if not available.
     doc_map = {}
     for i, (doc_id_str, emb) in enumerate(zip(doc_ids, embeddings)):
-        index.add(key=i + 1, vector=emb)
+        index.add(i + 1, emb)
         doc_map[i + 1] = doc_id_str
     return index, doc_map
 
@@ -292,12 +281,16 @@ def search_usearch_index(query_text, index, doc_map, top_k=5):
     Returns a list of tuples (doc_id, distance).
     """
     query_embedding = embed_text_hf([query_text])[0]
-    keys, distances = index.search(vector=query_embedding, count=top_k)
+    match = index.search(query_embedding, top_k)
+    # Access the keys and distances attributes from the Match object.
+    keys = match.keys  
+    distances = match.distances  
     results = []
     for key, dist in zip(keys, distances):
         str_id = doc_map[key]
         results.append((str_id, dist))
     return results
+
 
 
 def show_context(chosen_docs):
@@ -375,13 +368,16 @@ def call_openrouter(prompt, openrouter_api_key, model="openai/gpt-3.5-turbo", co
 # Main Function
 ########################################
 
+DEBUG_MODE = True
+DOCS_CSV = "docs.csv"
+
 def main():
     # 1) User Input (hard-coded for demo)
     user_question = "What scientific breakthroughs will impact the US markets the most?"
     date_start = "2021-01-01"
     date_end = "2025-12-31"
 
-    # 2) Run Finweb Slow Search (or load from CSV in debug mode)
+    # 2) Get Finweb Slow Search results (or load from CSV in debug mode)
     if DEBUG_MODE and os.path.exists(DOCS_CSV):
         print("DEBUG MODE: Loading documents from CSV.")
         df = pl.read_csv(DOCS_CSV)
@@ -400,11 +396,13 @@ def main():
         if df is None or df.is_empty():
             print("No results returned from slow search. Exiting.")
             return
-        # Filter to only the top 500 by similarity
+        # Optionally, filter to the top 500 by similarity:
         df = df.sort(by="similarity", descending=True).head(500)
-        save_docs_to_csv(df)
+        # Save the DataFrame to CSV for future debugging sessions.
+        df.write_csv(DOCS_CSV)
+        print(f"Saved {len(df)} docs to {DOCS_CSV}.")
 
-    # 3) Generate Embeddings via HuggingFace and Build USearch Index
+    # 3) Build docs list from the DataFrame
     docs = []
     for idx, row in enumerate(df.iter_rows(named=True)):
         doc_id = f"doc{idx}"
@@ -432,6 +430,7 @@ def main():
         for (doc_id_str, dist) in results:
             doc_data = next(d for d in docs if d["id"] == doc_id_str)
             chosen_docs.append(doc_data)
+        print("DEBUG: Chosen docs:", chosen_docs)
         if SHOW_CONTEXT:
             show_context(chosen_docs)
         prompt = build_prompt(user_question, chosen_docs)
@@ -448,7 +447,6 @@ def main():
         conversation_history.append({"role": "user", "content": user_question})
         conversation_history.append({"role": "assistant", "content": answer_text})
         user_question = input("Enter a follow-up question (or 'exit' to quit): ")
-
 
 if __name__ == "__main__":
     main()
