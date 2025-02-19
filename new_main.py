@@ -2,21 +2,17 @@ import datetime as dt
 import os
 import time
 import requests
-import zstandard as zstd
-import orjson
-import polars as pl
-from dotenv import load_dotenv
+import zstandard as zstd # Provides high-speed compression and decompression using the Zstandard algorithm.
+import orjson # A fast JSON parser and serializer for handling JSON data efficiently.
+import polars as pl # A DataFrame library for efficient data manipulation and analysis (similar to pandas)
+from dotenv import load_dotenv # For key handling using .env files
 from cryptography.fernet import Fernet
 import numpy as np
 import json
-import usearch
-from usearch.index import Index
+from usearch.index import Index # Imports the Index class used to create and manage a search index for embedding vectors
 import openai
 import concurrent.futures
-
-
-# Import the Hugging Face tokenizer
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer # Import the Hugging Face tokenizer
 import string
 
 # Initialize the tokenizer (adjust the model name if needed)
@@ -25,17 +21,12 @@ tokenizer = AutoTokenizer.from_pretrained("distilbert-base-uncased")
 # Load environment variables from keys.env file
 load_dotenv("keys.env")
 
-# Set whether to display context or not
-SHOW_CONTEXT = True
-
-CONTEXT_LIMIT = 16384
-
 
 ########################################
 # Helper Function for Truncation Using Tokenizer
 ########################################
 
-def truncate_text(text, max_tokens=255):
+def truncate_text(text, max_tokens=255): # max_tokens is set to 255 because the embedding model has a 256 limit
     """
     Truncates the input text using the tokenizer's encode method,
     ensuring the tokenized sequence is no longer than max_tokens.
@@ -44,7 +35,6 @@ def truncate_text(text, max_tokens=255):
     encoded = tokenizer.encode(text, add_special_tokens=True, truncation=True, max_length=max_tokens)
     truncated_text = tokenizer.decode(encoded, skip_special_tokens=True)
     return truncated_text
-
 
 
 ########################################
@@ -116,7 +106,7 @@ def embed_text_hf(texts):
     then batches texts in groups of up to 16 and returns a NumPy array of embeddings.
     The embedding requests are performed in parallel to speed up runtime.
     """
-    # Truncate each text using the updated tokenizer-based method (max 255 tokens)
+    # Truncate each text using the updated tokenizer-based method (max 265 tokens allowed by endpoint)
     texts = [truncate_text(t, max_tokens=255) for t in texts]
     
     endpoint_url = "https://j3rdbna8u6w2m9zq.us-east-1.aws.endpoints.huggingface.cloud"
@@ -136,7 +126,6 @@ def embed_text_hf(texts):
     
     # Concatenate all embedding arrays along the first axis
     return np.concatenate(results, axis=0)
-
 
 
 ########################################
@@ -257,8 +246,7 @@ def handle_api_error(response):
 # Build Expansions via OpenRouter LLM
 ########################################
 
-
-def generate(prompt: str) -> str:
+def generate_expansions(prompt: str) -> str:
     """
     Generate a response to a prompt using the OpenRouter API.
     
@@ -270,11 +258,12 @@ def generate(prompt: str) -> str:
         api_key=os.environ["OPENROUTER_API_KEY"],
     )
     response = oai_client.chat.completions.create(
-        model="openai/gpt-4o-mini",  # use the model you prefer
+        model="openai/gpt-4o-2024-11-20",  # use the model you prefer
         messages=[{"role": "user", "content": prompt}],
         stream=False,
     )
     return response.choices[0].message.content
+
 
 def build_expansions(user_question: str) -> list:
     """
@@ -282,7 +271,7 @@ def build_expansions(user_question: str) -> list:
     Returns a list of 5 expansion strings.
     If the output is not in the correct format, it falls back to a default list.
     """
-    default_expansions = [
+    default_expansions = [ 
         user_question,
         f"What are the details of {user_question}?",
         f"Explain the context of {user_question}",
@@ -291,12 +280,12 @@ def build_expansions(user_question: str) -> list:
     ]
     
     prompt = (
-        f"Return a valid JSON array containing exactly 5 distinct, well-phrased expansions for the following question. "
+        f"Return a valid JSON array containing exactly 9 distinct, well-phrased expansions for the following question. "
         f"Return only the JSON array with no extra text. The question is: \"{user_question}\"."
     )
     
     try:
-        response_text = generate(prompt)
+        response_text = generate_expansions(prompt)
         print("DEBUG: Raw expansions response:", response_text)
         cleaned = response_text.strip()
         # Explicitly remove markdown code fences if present:
@@ -307,14 +296,13 @@ def build_expansions(user_question: str) -> list:
         parsed_output = json.loads(cleaned)
         if (isinstance(parsed_output, list) and len(parsed_output) == 5 and 
             all(isinstance(item, str) for item in parsed_output)):
-            return parsed_output
+            return [user_question] + parsed_output
         else:
             print("Generated expansions not in expected format. Using default expansions.")
             return default_expansions
     except Exception as e:
         print(f"Error generating expansions via OpenRouter: {e}. Using default expansions.")
         return default_expansions
-
 
 
 ########################################
@@ -358,7 +346,6 @@ def search_usearch_index(query_text, index, doc_map, top_k=5):
     return results
 
 
-
 def show_context(chosen_docs):
     """
     Prints the context (document information) that will be sent to the language model.
@@ -383,17 +370,17 @@ def build_prompt(user_question, chosen_docs):
         context_text.append(f"{label}: {doc['content']}")
     combined_context = "\n\n".join(context_text)
     prompt = f"""You are a helpful assistant. Answer the user's question using ONLY the context below.
-When you use information from a chunk, cite it by referencing its label in square brackets, e.g. [doc3].
+        When you use information from a chunk, cite it by referencing its label in square brackets, e.g. [doc3].
 
-CONTEXT:
-{combined_context}
+        CONTEXT:
+        {combined_context}
 
-QUESTION:
-{user_question}
+        QUESTION:
+        {user_question}
 
-Please provide a concise answer with clear citations.
-If the answer isn't contained in the context, say so explicitly.
-"""
+        Please provide a concise answer with clear citations.
+        If the answer isn't contained in the context, say so explicitly.
+        """
     return prompt
 
 
@@ -401,7 +388,7 @@ If the answer isn't contained in the context, say so explicitly.
 # OpenRouter API Call
 ########################################
 
-def call_openrouter(prompt, openrouter_api_key, model="openai/gpt-3.5-turbo", conversation_history=None):
+def call_openrouter(prompt, openrouter_api_key, model="openai/gpt-4o-2024-11-20", conversation_history=None):
     """
     Calls the OpenRouter API using a chat-completion format.
     If conversation_history is provided, it will be included in the request.
@@ -435,22 +422,20 @@ def call_openrouter(prompt, openrouter_api_key, model="openai/gpt-3.5-turbo", co
 # Main Function
 ########################################
 
-DEBUG_MODE = True
-
 
 def main():
     # 1) User Input (hard-coded for demo)
     # user_question = "What scientific breakthroughs will impact the US markets the most?"
-    # user_question = "As a capital seeker offering investors a liquidation preference on their investment, would it be more favourable to you if it was a participating or a non-participating liquidation preference, and why?"
-    user_question = "In investment, what is the difference between a liquidity preference and a liquidation preference?"
+    user_question = "As a capital seeker offering investors a liquidation preference on their investment, would it be more favourable to you if it was a participating or a non-participating liquidation preference, and why?"
+    # user_question = "In investment, what is the difference between a liquidity preference and a liquidation preference?"
     date_start = "2000-01-01"
     date_end = "2025-12-31"
+    show_context = True
 
     filename = user_question.translate(str.maketrans('', '', string.punctuation)).replace(" ", "_") + ".csv"
 
-
     # 2) Get Finweb Slow Search results (or load from CSV in debug mode)
-    if DEBUG_MODE and os.path.exists(filename):
+    if os.path.exists(filename):
         print("DEBUG MODE: Loading documents from CSV.")
         df = pl.read_csv(filename)
     else:
@@ -469,7 +454,7 @@ def main():
         if df is None or df.is_empty():
             print("No results returned from slow search. Exiting.")
             return
-        # Optionally, filter to the top 500 by similarity:
+        # Optionally, filter to the top 5000 by similarity:
         df = df.sort(by="similarity", descending=True).head(5000)
         # Save the DataFrame to CSV for future debugging sessions.
         df.write_csv(filename)
@@ -504,11 +489,11 @@ def main():
             doc_data = next(d for d in docs if d["id"] == doc_id_str)
             chosen_docs.append(doc_data)
         # print("DEBUG: Chosen docs:", chosen_docs)
-        if SHOW_CONTEXT:
+        if show_context:
             show_context(chosen_docs)
         prompt = build_prompt(user_question, chosen_docs)
-        encoded_prompt = tokenizer.encode(prompt, add_special_tokens=True)
-        print(f"Context token count: {len(encoded_prompt)} tokens (limit: {CONTEXT_LIMIT} tokens)")
+        # encoded_prompt = tokenizer.encode(prompt, add_special_tokens=True)
+        # print(f"Context token count: {len(encoded_prompt)} tokens")
 
         model_choice = "openai/gpt-4o-2024-11-20"
         answer_text = call_openrouter(
