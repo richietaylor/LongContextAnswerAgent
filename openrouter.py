@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 
 load_dotenv(dotenv_path='keys.env')
 
-ROUTER_API_KEY = os.environ["ROUTER_API_KEY"]
+ROUTER_API_KEY = os.environ["OPENROUTER_API_KEY"]
 
 
 def generate(prompt: str) -> str:

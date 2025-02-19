@@ -11,6 +11,8 @@ import numpy as np
 import json
 import usearch
 from usearch.index import Index
+import openai
+
 
 # Import the Hugging Face tokenizer
 from transformers import AutoTokenizer
@@ -23,6 +25,8 @@ load_dotenv("keys.env")
 
 # Set whether to display context or not
 SHOW_CONTEXT = True
+
+CONTEXT_LIMIT = 16384
 
 
 ########################################
@@ -239,16 +243,68 @@ def handle_api_error(response):
         print(f"{dt.datetime.utcnow()} Unhandled error {response.status_code}:\n{response.text}")
 
 
-def build_expansions(user_question: str) -> list[str]:
-    """Generates simple expansions for the user question to help the search."""
-    expansions = [
+########################################
+# Build Expansions via OpenRouter LLM
+########################################
+
+
+def generate(prompt: str) -> str:
+    """
+    Generate a response to a prompt using the OpenRouter API.
+    
+    :param prompt: The prompt to generate a response to.
+    :return: The generated response text.
+    """
+    oai_client = openai.OpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=os.environ["OPENROUTER_API_KEY"],
+    )
+    response = oai_client.chat.completions.create(
+        model="openai/gpt-4o-mini",  # use the model you prefer
+        messages=[{"role": "user", "content": prompt}],
+        stream=False,
+    )
+    return response.choices[0].message.content
+
+def build_expansions(user_question: str) -> list:
+    """
+    Generates expansions for the user's question by calling the OpenRouter API.
+    Returns a list of 5 expansion strings.
+    If the output is not in the correct format, it falls back to a default list.
+    """
+    default_expansions = [
         user_question,
         f"What are the details of {user_question}?",
         f"Explain the context of {user_question}",
         f"Why is {user_question} important?",
         f"Information about {user_question}",
     ]
-    return expansions
+    
+    prompt = (
+        f"Return a valid JSON array containing exactly 5 distinct, well-phrased expansions for the following question. "
+        f"Return only the JSON array with no extra text. The question is: \"{user_question}\"."
+    )
+    
+    try:
+        response_text = generate(prompt)
+        print("DEBUG: Raw expansions response:", response_text)
+        cleaned = response_text.strip()
+        # Explicitly remove markdown code fences if present:
+        if cleaned.startswith("```json"):
+            cleaned = cleaned[len("```json"):].strip()
+        if cleaned.endswith("```"):
+            cleaned = cleaned[:-3].strip()
+        parsed_output = json.loads(cleaned)
+        if (isinstance(parsed_output, list) and len(parsed_output) == 5 and 
+            all(isinstance(item, str) for item in parsed_output)):
+            return parsed_output
+        else:
+            print("Generated expansions not in expected format. Using default expansions.")
+            return default_expansions
+    except Exception as e:
+        print(f"Error generating expansions via OpenRouter: {e}. Using default expansions.")
+        return default_expansions
+
 
 
 ########################################
@@ -368,7 +424,7 @@ def call_openrouter(prompt, openrouter_api_key, model="openai/gpt-3.5-turbo", co
 # Main Function
 ########################################
 
-DEBUG_MODE = True
+DEBUG_MODE = False
 DOCS_CSV = "docs.csv"
 
 def main():
@@ -383,6 +439,7 @@ def main():
         df = pl.read_csv(DOCS_CSV)
     else:
         expansions = build_expansions(user_question)
+        print(expansions)
         sql_filter = f"SELECT loc FROM engine WHERE published BETWEEN '{date_start}' AND '{date_end}'"
         df = finweb_slow_search(
             question=user_question,
@@ -397,7 +454,7 @@ def main():
             print("No results returned from slow search. Exiting.")
             return
         # Optionally, filter to the top 500 by similarity:
-        df = df.sort(by="similarity", descending=True).head(500)
+        df = df.sort(by="similarity", descending=True).head(5000)
         # Save the DataFrame to CSV for future debugging sessions.
         df.write_csv(DOCS_CSV)
         print(f"Saved {len(df)} docs to {DOCS_CSV}.")
@@ -430,11 +487,14 @@ def main():
         for (doc_id_str, dist) in results:
             doc_data = next(d for d in docs if d["id"] == doc_id_str)
             chosen_docs.append(doc_data)
-        print("DEBUG: Chosen docs:", chosen_docs)
+        # print("DEBUG: Chosen docs:", chosen_docs)
         if SHOW_CONTEXT:
             show_context(chosen_docs)
         prompt = build_prompt(user_question, chosen_docs)
-        model_choice = "openai/gpt-3.5-turbo"
+        encoded_prompt = tokenizer.encode(prompt, add_special_tokens=True)
+        print(f"Context token count: {len(encoded_prompt)} tokens (limit: {CONTEXT_LIMIT} tokens)")
+
+        model_choice = "openai/gpt-4o-2024-11-20"
         answer_text = call_openrouter(
             prompt=prompt,
             openrouter_api_key=openrouter_api_key,
