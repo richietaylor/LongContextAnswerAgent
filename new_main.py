@@ -12,6 +12,7 @@ import json
 import usearch
 from usearch.index import Index
 import openai
+import concurrent.futures
 
 
 # Import the Hugging Face tokenizer
@@ -113,6 +114,7 @@ def embed_text_hf(texts):
     Embeds a list of texts using the HuggingFace inference endpoint.
     This function first truncates each text to ensure it meets the token limit,
     then batches texts in groups of up to 16 and returns a NumPy array of embeddings.
+    The embedding requests are performed in parallel to speed up runtime.
     """
     # Truncate each text using the updated tokenizer-based method (max 255 tokens)
     texts = [truncate_text(t, max_tokens=255) for t in texts]
@@ -122,12 +124,19 @@ def embed_text_hf(texts):
         raise ValueError("HuggingFace server endpoint not set. Please set HF_EMBED_ENDPOINT in keys.env.")
 
     batch_size = 16  # Maximum allowed by the endpoint.
-    all_embeddings = []
-    for i in range(0, len(texts), batch_size):
-        batch = texts[i: i + batch_size]
-        embeddings = remotely_embed_sentences_sync(batch, endpoint_url=endpoint_url, return_as="numpy")
-        all_embeddings.append(embeddings)
-    return np.concatenate(all_embeddings, axis=0)
+    batches = [texts[i: i + batch_size] for i in range(0, len(texts), batch_size)]
+
+    # Use ThreadPoolExecutor to run embedding requests in parallel
+    # 64 is the sweet-spot for max_workers
+    with concurrent.futures.ThreadPoolExecutor(max_workers=64) as executor:
+        results = list(executor.map(
+            lambda batch: remotely_embed_sentences_sync(batch, endpoint_url=endpoint_url, return_as="numpy"),
+            batches
+        ))
+    
+    # Concatenate all embedding arrays along the first axis
+    return np.concatenate(results, axis=0)
+
 
 
 ########################################
