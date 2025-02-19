@@ -16,6 +16,7 @@ import openai
 
 # Import the Hugging Face tokenizer
 from transformers import AutoTokenizer
+import string
 
 # Initialize the tokenizer (adjust the model name if needed)
 tokenizer = AutoTokenizer.from_pretrained("distilbert-base-uncased")
@@ -116,7 +117,7 @@ def embed_text_hf(texts):
     # Truncate each text using the updated tokenizer-based method (max 255 tokens)
     texts = [truncate_text(t, max_tokens=255) for t in texts]
     
-    endpoint_url = os.getenv("HF_EMBED_ENDPOINT")
+    endpoint_url = "https://j3rdbna8u6w2m9zq.us-east-1.aws.endpoints.huggingface.cloud"
     if not endpoint_url:
         raise ValueError("HuggingFace server endpoint not set. Please set HF_EMBED_ENDPOINT in keys.env.")
 
@@ -139,7 +140,7 @@ def finweb_slow_search(
     sql_filter: str,
     n_results: int = 10_000,
     n_probes: int = 300,
-    n_contextify: int = 128,
+    n_contextify: int = 256,
     algorithm: str = "hybrid-1",
     attempts: int = 0,
 ) -> pl.DataFrame:
@@ -356,6 +357,7 @@ def show_context(chosen_docs):
     print("\n=== CONTEXT CHUNKS ===")
     for doc in chosen_docs:
         print(f"- [Chunk ID: {doc['id']}]")
+        # print(f"  Similarity: {doc['similarity']}")
         print(f"  Title: {doc['title']}")
         print(f"  URL: {doc['url']}")
         print(f"  Content snippet: {doc['content'][:200]}...\n")
@@ -424,19 +426,24 @@ def call_openrouter(prompt, openrouter_api_key, model="openai/gpt-3.5-turbo", co
 # Main Function
 ########################################
 
-DEBUG_MODE = False
-DOCS_CSV = "docs.csv"
+DEBUG_MODE = True
+
 
 def main():
     # 1) User Input (hard-coded for demo)
-    user_question = "What scientific breakthroughs will impact the US markets the most?"
-    date_start = "2021-01-01"
+    # user_question = "What scientific breakthroughs will impact the US markets the most?"
+    # user_question = "As a capital seeker offering investors a liquidation preference on their investment, would it be more favourable to you if it was a participating or a non-participating liquidation preference, and why?"
+    user_question = "In investment, what is the difference between a liquidity preference and a liquidation preference?"
+    date_start = "2000-01-01"
     date_end = "2025-12-31"
 
+    filename = user_question.translate(str.maketrans('', '', string.punctuation)).replace(" ", "_") + ".csv"
+
+
     # 2) Get Finweb Slow Search results (or load from CSV in debug mode)
-    if DEBUG_MODE and os.path.exists(DOCS_CSV):
+    if DEBUG_MODE and os.path.exists(filename):
         print("DEBUG MODE: Loading documents from CSV.")
-        df = pl.read_csv(DOCS_CSV)
+        df = pl.read_csv(filename)
     else:
         expansions = build_expansions(user_question)
         print(expansions)
@@ -447,7 +454,7 @@ def main():
             sql_filter=sql_filter,
             n_results=10_000,
             n_probes=300,
-            n_contextify=512,
+            n_contextify=128,
             algorithm="hybrid-1"
         )
         if df is None or df.is_empty():
@@ -456,8 +463,8 @@ def main():
         # Optionally, filter to the top 500 by similarity:
         df = df.sort(by="similarity", descending=True).head(5000)
         # Save the DataFrame to CSV for future debugging sessions.
-        df.write_csv(DOCS_CSV)
-        print(f"Saved {len(df)} docs to {DOCS_CSV}.")
+        df.write_csv(filename)
+        print(f"Saved {len(df)} docs to {filename}.")
 
     # 3) Build docs list from the DataFrame
     docs = []
