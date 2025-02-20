@@ -271,6 +271,8 @@ def build_expansions(user_question: str) -> list:
     Returns a list of 5 expansion strings.
     If the output is not in the correct format, it falls back to a default list.
     """
+    print(f"Generating expansions for question: {user_question}")
+
     default_expansions = [ 
         user_question,
         f"What are the details of {user_question}?",
@@ -286,7 +288,7 @@ def build_expansions(user_question: str) -> list:
     
     try:
         response_text = generate_expansions(prompt)
-        print("DEBUG: Raw expansions response:", response_text)
+        # print("DEBUG: Raw expansions response:", response_text)
         cleaned = response_text.strip()
         # Explicitly remove markdown code fences if present:
         if cleaned.startswith("```json"):
@@ -294,7 +296,7 @@ def build_expansions(user_question: str) -> list:
         if cleaned.endswith("```"):
             cleaned = cleaned[:-3].strip()
         parsed_output = json.loads(cleaned)
-        if (isinstance(parsed_output, list) and len(parsed_output) == 5 and 
+        if (isinstance(parsed_output, list) and len(parsed_output) == 9 and 
             all(isinstance(item, str) for item in parsed_output)):
             return [user_question] + parsed_output
         else:
@@ -424,14 +426,34 @@ def call_openrouter(prompt, openrouter_api_key, model="openai/gpt-4o-2024-11-20"
 
 
 def main():
-    # 1) User Input (hard-coded for demo)
-    # user_question = "What scientific breakthroughs will impact the US markets the most?"
-    user_question = "As a capital seeker offering investors a liquidation preference on their investment, would it be more favourable to you if it was a participating or a non-participating liquidation preference, and why?"
-    # user_question = "In investment, what is the difference between a liquidity preference and a liquidation preference?"
-    date_start = "2000-01-01"
-    date_end = "2025-12-31"
-    show_context = True
+    # 1) User Input 
 
+    # user_question = "What scientific breakthroughs will impact the US markets the most?"
+    # user_question = "As a capital seeker offering investors a liquidation preference on their investment, would it be more favourable to you if it was a participating or a non-participating liquidation preference, and why?"
+    # user_question = "In investment, what is the difference between a liquidity preference and a liquidation preference?"
+    user_question = input("Enter a question to ask the system: ")
+    # date_start = "2000-01-01"
+    # date_end = "2025-12-31"
+    def validate_date(date_text):
+        try:
+            dt.datetime.strptime(date_text, '%Y-%m-%d')
+            return True
+        except ValueError:
+            return False
+
+    date_start = input("Enter the start date for the search (YYYY-MM-DD): ")
+    while not validate_date(date_start):
+        print("Incorrect date format, should be YYYY-MM-DD")
+        date_start = input("Enter the start date for the search (YYYY-MM-DD): ")
+
+    date_end = input("Enter the end date for the search (YYYY-MM-DD): ")
+    while not validate_date(date_end):
+        print("Incorrect date format, should be YYYY-MM-DD")
+        date_end = input("Enter the end date for the search (YYYY-MM-DD): ")
+    # dump_context = True  
+    dump_context = input("Show context? (y/n): ").lower() == "y"
+    
+    # Prepare a filename for saving the search results to CSV
     filename = user_question.translate(str.maketrans('', '', string.punctuation)).replace(" ", "_") + ".csv"
 
     # 2) Get Finweb Slow Search results (or load from CSV in debug mode)
@@ -448,7 +470,7 @@ def main():
             sql_filter=sql_filter,
             n_results=10_000,
             n_probes=300,
-            n_contextify=256,
+            n_contextify=256, #256 seemed to work the best
             algorithm="hybrid-1"
         )
         if df is None or df.is_empty():
@@ -489,7 +511,7 @@ def main():
             doc_data = next(d for d in docs if d["id"] == doc_id_str)
             chosen_docs.append(doc_data)
         # print("DEBUG: Chosen docs:", chosen_docs)
-        if show_context:
+        if dump_context:
             show_context(chosen_docs)
         prompt = build_prompt(user_question, chosen_docs)
         # encoded_prompt = tokenizer.encode(prompt, add_special_tokens=True)

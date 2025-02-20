@@ -62,6 +62,8 @@ or
 py main.py
 ```
 From there you can use the script as you'd expect, you'll be prompted to put in your question and date range, and any follow up questions in the command line.
+
+If you want a deeper look into the context returned by the FinWeb API, check the ```user_question.csv``` file that is created when you use the script.
 ***
 ## Acknowledgements
 
