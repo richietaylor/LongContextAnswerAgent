@@ -258,7 +258,7 @@ def generate_expansions(prompt: str) -> str:
         api_key=os.environ["OPENROUTER_API_KEY"],
     )
     response = oai_client.chat.completions.create(
-        model="openai/gpt-4o-2024-11-20",  # use the model you prefer
+        model="openai/gpt-4o-2024-11-20",  # this model worked well enough, but it could be switched out
         messages=[{"role": "user", "content": prompt}],
         stream=False,
     )
@@ -406,7 +406,7 @@ def call_openrouter(prompt, openrouter_api_key, model="openai/gpt-4o-2024-11-20"
     data = {
         "model": model,
         "messages": messages,
-        "temperature": 0.7,
+        "temperature": 0.7, # I messed around a bit with temp, around 0.7 seemed to work the best
         "max_tokens": 500,
     }
     try:
@@ -428,6 +428,7 @@ def call_openrouter(prompt, openrouter_api_key, model="openai/gpt-4o-2024-11-20"
 def main():
     # 1) User Input 
 
+    # Some exmaple questions: 
     # user_question = "What scientific breakthroughs will impact the US markets the most?"
     # user_question = "As a capital seeker offering investors a liquidation preference on their investment, would it be more favourable to you if it was a participating or a non-participating liquidation preference, and why?"
     # user_question = "In investment, what is the difference between a liquidity preference and a liquidation preference?"
@@ -470,15 +471,15 @@ def main():
             sql_filter=sql_filter,
             n_results=10_000,
             n_probes=300,
-            n_contextify=256, #256 seemed to work the best
+            n_contextify=256, # Played around a bit, 256 seemed to work the best
             algorithm="hybrid-1"
         )
         if df is None or df.is_empty():
             print("No results returned from slow search. Exiting.")
             return
         # Filter to the top 5000 by similarity:
-        df = df.sort(by="similarity", descending=True).head(5000)
-        # Save the DataFrame to CSV for future debugging sessions.
+        df = df.sort(by="similarity", descending=True).head(5000) #change this for more or less context
+        # Save the DataFrame to CSV for if the same question is asked in the future.
         df.write_csv(filename)
         print(f"Saved {len(df)} docs to {filename}.")
 
@@ -517,7 +518,7 @@ def main():
         # encoded_prompt = tokenizer.encode(prompt, add_special_tokens=True)
         # print(f"Context token count: {len(encoded_prompt)} tokens")
 
-        model_choice = "openai/gpt-4o-2024-11-20"
+        model_choice = "openai/gpt-4o-2024-11-20" # This model worked well enough, although it could be swapped out if needed
         answer_text = call_openrouter(
             prompt=prompt,
             openrouter_api_key=openrouter_api_key,
