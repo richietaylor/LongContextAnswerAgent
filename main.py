@@ -15,7 +15,7 @@ import concurrent.futures
 from transformers import AutoTokenizer # Import the Hugging Face tokenizer
 import string
 
-# Initialize the tokenizer (adjust the model name if needed)
+# Initialize the tokenizer
 tokenizer = AutoTokenizer.from_pretrained("distilbert-base-uncased")
 
 # Load environment variables from keys.env file
